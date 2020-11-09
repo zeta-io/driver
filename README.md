@@ -1,7 +1,11 @@
 # Introduce
-gin driver for [zeta](https://github.com/zeta-io/zeta).
+Gin driver for [zeta](https://github.com/zeta-io/zeta).
+# Feature
+Features:
+ - Parameters of the assembly
+ - Parameter validation
 # Usage
-The demo of gin:
+Sample:
 ```go
 package main
 
@@ -30,3 +34,12 @@ func main() {
 	}
 }
 ```
+Request parameter tag:
+ - param:"query,${name}": Bind query parameters.
+ - param:"form,${name}": Bind form parameters.
+ - param:"body": Bind body parameters.
+ - param:"path,${name}": Bind path parameters.
+
+# Validator
+It's used [https://github.com/go-playground/validator](https://github.com/go-playground/validator) by default.
+
