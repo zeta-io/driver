@@ -80,20 +80,31 @@ func contentType(c *gin.Context) string{
 	return strings.TrimSpace(strings.Split(c.ContentType(), ";")[0])
 }
 
-func (p *requestParamsProcessor) process(t reflect.Type, source, name string) (interface{}, bool, error){
+func (p *requestParamsProcessor) process(t reflect.Type, source, name string, defaultValue *string) (ret interface{}, ok bool, err error){
 	switch source {
 	case "query":
-		return p.processQuery(t, name)
-	case "form":
-		return p.processFormData(t, name)
+		ret, ok, err = p.processQuery(t, name)
 	case "body":
-		return p.processJson(t, name)
+		ret, ok, err = p.processBody(t, name)
 	case "path":
-		return p.processPath(t, name)
+		ret, ok, err = p.processPath(t, name)
+	case "header":
+		ret, ok, err = p.processHeader(t, name)
+	case "file":
+		ret, ok, err = p.processFile(t, name)
+	case "cookie":
+		ret, ok, err = p.processCookie(t, name)
 	default:
-		return nil, false, errors.New(fmt.Sprintf("unsupport params source: %v", source))
+		ret, ok, err = nil, false, errors.New(fmt.Sprintf("unsupport params source: %v", source))
+		return
 	}
+	if ! ok && defaultValue != nil{
+		ret, err = p.serial.DeSerial(*defaultValue, t)
+		ok = true
+	}
+	return
 }
+
 
 func (p *requestParamsProcessor) processQuery(t reflect.Type, name string) (interface{}, bool, error){
 	src := interface{}(nil)
@@ -103,12 +114,42 @@ func (p *requestParamsProcessor) processQuery(t reflect.Type, name string) (inte
 	}else{
 		src, ok = p.queries.Get(name)
 	}
+	if ! ok{
+		return nil, false, nil
+	}
 	v, err := p.serial.DeSerial(src, t)
-	return v, ok, err
+	return v, true, err
 }
 
 func (p *requestParamsProcessor) processPath(t reflect.Type, name string) (interface{}, bool, error){
-	v, err := p.serial.DeSerial(p.c.Param(name), t)
+	value, ok := p.c.Params.Get(name)
+	if ! ok {
+		return nil, false, nil
+	}
+	v, err := p.serial.DeSerial(value, t)
+	return v, true, err
+}
+
+func (p *requestParamsProcessor) processFile(t reflect.Type, name string) (interface{}, bool, error){
+	file, err := p.c.FormFile(name)
+	return file, err == nil, err
+}
+
+func (p *requestParamsProcessor) processHeader(t reflect.Type, name string) (interface{}, bool, error){
+	header := p.c.GetHeader(name)
+	if header == ""{
+		return nil, false, nil
+	}
+	v, err := p.serial.DeSerial(header, t)
+	return v, true, err
+}
+
+func (p *requestParamsProcessor) processCookie(t reflect.Type, name string) (interface{}, bool, error){
+	value, err := p.c.Cookie(name)
+	if err != nil {
+		return nil, false, err
+	}
+	v, err := p.serial.DeSerial(value, t)
 	return v, true, err
 }
 
@@ -124,9 +165,23 @@ func (p *requestParamsProcessor) processFormData(t reflect.Type, name string) (i
 	return v, ok, err
 }
 
-func (p *requestParamsProcessor) processJson(t reflect.Type, name string) (interface{}, bool, error){
-	v, err := p.serial.DeSerial(p.body, t)
-	return v, true, err
+func (p *requestParamsProcessor) processBody(t reflect.Type, name string) (interface{}, bool, error){
+	contentType := contentType(p.c)
+	if contentType == string(zeta.ContentTypeJSON) {
+		if name != ""{
+
+		}else{
+			v, err := p.serial.DeSerial(p.body, t)
+			return v, true, err
+		}
+	}else if contentType == string(zeta.ContentTypePostForm){
+		if name != ""{
+			return p.processFormData(t, name)
+		}else{
+
+		}
+	}
+	return nil, true, nil
 }
 
 func parseQuery(values Values, query string) error {

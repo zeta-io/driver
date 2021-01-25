@@ -6,3 +6,5 @@ require (
 	github.com/gin-gonic/gin v1.6.3
 	github.com/zeta-io/zeta v1.0.1
 )
+
+replace github.com/zeta-io/zeta => D:\\workspace-zeta\\zeta

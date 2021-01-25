@@ -2,6 +2,7 @@ package ginx
 
 import (
 	"context"
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/zeta-io/zeta"
 	"reflect"
@@ -13,6 +14,7 @@ const ContextKey = "gin#context#key"
 var(
 	contextType = "context.Context"
 	ginContextType = "gin.Context"
+	sourceTags = []string{"query", "body", "path", "header", "cookie", "file"}
 )
 
 type Driver struct {
@@ -59,41 +61,58 @@ func (d *Driver) Run(addr... string) error{
 	return d.e.Run(addr...)
 }
 
-func (d *Driver) Handle(method zeta.Method, url string, middleware ...zeta.HandlerFunc){
-	handleFunc := make([]gin.HandlerFunc, 0)
-	for _, m := range middleware{
-		call := m
-		handleFunc = append(handleFunc, func(c *gin.Context){
-			ctx := context.WithValue(context.Background(), ContextKey, c)
-			if call == nil{
-				panic("handler func args is nil.")
-			}
-			if reflect.TypeOf(call).Kind() != reflect.Func{
-				panic("handler func type must be func.")
-			}
-			if c.IsAborted(){
-				return
-			}
-			rets, err := d.process(ctx, c, call)
-			if err != nil{
-				d.r(c, err.Error(), err)
-				return
-			}
-			if len(rets) > 0{
-				var data interface{}
-				var err error
-				for _, ret := range rets{
-					if e, ok := ret.Interface().(error); ok{
-						err = e
-					}else if data == nil{
-						data = ret.Interface()
-					}
-				}
-				d.r(c, data, err)
-			}
-		})
+func (d *Driver) Option(z *zeta.Zeta) {
+	for _, m := range z.Middleware(){
+		d.e.Use(d.handleFunc(m))
 	}
-	d.e.Handle(string(method), url, handleFunc...)
+	for _, m := range z.Mappings(){
+		d.Handle(m)
+	}
+}
+
+func (d *Driver) Handle(mapping zeta.Mapping){
+	handleFunc := make([]gin.HandlerFunc, 0)
+	for _, m := range mapping.Middleware(){
+		handleFunc = append(handleFunc, d.handleFunc(m))
+	}
+	if mapping.Method() == zeta.MethodAny{
+		d.e.Any(mapping.Url(), handleFunc...)
+	}else{
+		d.e.Handle(string(mapping.Method()), mapping.Url(), handleFunc...)
+	}
+}
+
+func (d *Driver) handleFunc(call zeta.HandlerFunc) gin.HandlerFunc{
+	return func(c *gin.Context){
+		ctx := context.WithValue(context.Background(), ContextKey, c)
+		if call == nil{
+			panic("handler func args is nil.")
+		}
+		if reflect.TypeOf(call).Kind() != reflect.Func{
+			fmt.Println(reflect.TypeOf(call).Kind())
+			panic("handler func type must be func.")
+		}
+		if c.IsAborted(){
+			return
+		}
+		rets, err := d.process(ctx, c, call)
+		if err != nil{
+			d.r(c, err.Error(), err)
+			return
+		}
+		if len(rets) > 0{
+			var data interface{}
+			var err error
+			for _, ret := range rets{
+				if e, ok := ret.Interface().(error); ok{
+					err = e
+				}else if data == nil{
+					data = ret.Interface()
+				}
+			}
+			d.r(c, data, err)
+		}
+	}
 }
 
 func (d *Driver) process(ctx context.Context, c *gin.Context, call interface{}) ([]reflect.Value, error){
@@ -148,17 +167,6 @@ func processRequestParams(processor *requestParamsProcessor, in reflect.Type, pt
 	obj := reflect.New(in).Elem()
 	for i := 0; i < in.NumField(); i ++{
 		f := in.Field(i)
-		name := f.Name
-		source := ""
-		if f.Tag.Get("param") == ""{
-			continue
-		}
-		params := strings.Split(f.Tag.Get("param"), ",")
-		source = params[0]
-		if len(params) > 1{
-			name = params[1]
-		}
-
 		ft := f.Type
 		ptr := false
 		if ft.Kind() == reflect.Ptr{
@@ -166,11 +174,15 @@ func processRequestParams(processor *requestParamsProcessor, in reflect.Type, pt
 			ft = ft.Elem()
 		}
 
-		ret, ok, err := processor.process(ft, source, name)
+		source, name, defaultValue := parseTag(f.Tag)
+		if source == ""{
+			continue
+		}
+		ret, ok, err := processor.process(ft, source, name, defaultValue)
 		if err != nil{
 			return obj, err
 		}
-		if (!ok || ret == nil) && ptr{
+		if ( ! ok || ret == nil) && ptr{
 			target := reflect.New(f.Type).Elem()
 			obj.FieldByName(f.Name).Set(target)
 		}else{
@@ -188,6 +200,32 @@ func processRequestParams(processor *requestParamsProcessor, in reflect.Type, pt
 		obj = obj.Addr()
 	}
 	return obj, nil
+}
+
+func parseTag(tag reflect.StructTag) (source, name string, defaultValue *string){
+	if tag == ""{
+		return
+	}
+	for _, tagName := range sourceTags{
+		if value, ok := tag.Lookup(tagName); ok{
+			name, defaultValue = parseTagValue(value)
+			source = tagName
+			break
+		}
+	}
+	return
+}
+
+func parseTagValue(value string) (name string, defaultValue *string){
+	strs := strings.Split(value, ",")
+	l := len(strs)
+	if l > 0{
+		name = strs[0]
+	}
+	if l > 1{
+		defaultValue = &strs[1]
+	}
+	return
 }
 
 
