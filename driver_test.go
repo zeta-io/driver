@@ -21,6 +21,7 @@ func TestNew1(t *testing.T) {
 		H1 string `header:"h1"`
 		C1 string `cookie:"c1"`
 		B1 string `body:"b1"`
+		B2 int `body:"b2"`
 	}) interface{}{
 		return s
 	})

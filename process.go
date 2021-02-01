@@ -2,6 +2,7 @@ package ginx
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/gin-gonic/gin"
@@ -37,6 +38,8 @@ type requestParamsProcessor struct {
 	serial zeta.Serial
 
 	body string
+	bodyObject map[string]interface{}
+
 	forms Values
 	queries Values
 	contentType string
@@ -169,17 +172,24 @@ func (p *requestParamsProcessor) processBody(t reflect.Type, name string) (inter
 	contentType := contentType(p.c)
 	if contentType == string(zeta.ContentTypeJSON) {
 		if name != ""{
-
+			if p.bodyObject == nil{
+				err := json.Unmarshal([]byte(p.body), &p.bodyObject)
+				if err != nil{
+					return nil, false, err
+				}
+			}
+			v, ok := p.bodyObject[name]
+			if ! ok{
+				return nil, false, nil
+			}
+			v, err := p.serial.DeSerial(v, t)
+			return v, true, err
 		}else{
 			v, err := p.serial.DeSerial(p.body, t)
 			return v, true, err
 		}
 	}else if contentType == string(zeta.ContentTypePostForm){
-		if name != ""{
-			return p.processFormData(t, name)
-		}else{
-
-		}
+		return p.processFormData(t, name)
 	}
 	return nil, true, nil
 }
